@@ -1,0 +1,28 @@
+name: Render VIAROVE V2D HQ audio test
+on:
+  push:
+    paths:
+      - 'incoming/V2D.ready'
+permissions:
+  contents: write
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Render HQ video with music
+        shell: bash
+        run: bash scripts/render_v2_quality_music.sh
+      - name: Commit rendered media
+        shell: bash
+        run: |
+          git config user.name "VIAROVE Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add media/VIAROVE_V2_QUALITY_MUSIC_TEST.mp4
+          git commit -m "Render VIAROVE V2D HQ music test" || exit 0
+          git push
