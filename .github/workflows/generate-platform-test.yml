@@ -1,0 +1,37 @@
+name: Generate VIAROVE platform test
+on:
+  push:
+    paths:
+      - 'incoming/VIAROVE_TEST_FRAME.ready'
+permissions:
+  contents: write
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build MP4 from VIAROVE frame
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p media /tmp/viarove
+          parts=(chunks/VIAROVE_TEST_FRAME.jpg.part*)
+          if [ ${#parts[@]} -eq 0 ]; then
+            echo 'No frame chunks found'
+            exit 1
+          fi
+          cat "${parts[@]}" | base64 -d > /tmp/viarove/frame.jpg
+          ffmpeg -y -loop 1 -i /tmp/viarove/frame.jpg -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -t 6 -vf 'scale=1080:1920:flags=lanczos,format=yuv420p' -r 30 -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 128k -shortest -movflags +faststart media/VIAROVE_PLATFORM_TEST.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height,r_frame_rate -of json media/VIAROVE_PLATFORM_TEST.mp4
+      - name: Commit generated test video
+        shell: bash
+        run: |
+          git config user.name 'VIAROVE Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add media/VIAROVE_PLATFORM_TEST.mp4
+          if git diff --cached --quiet; then
+            echo 'No media changes'
+            exit 0
+          fi
+          git commit -m 'Generate VIAROVE platform test video'
+          git push
