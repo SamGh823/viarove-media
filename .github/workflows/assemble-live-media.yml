@@ -1,0 +1,25 @@
+name: Assemble live media
+on:
+  push:
+    paths:
+      - 'incoming/live_parts/READY.txt'
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble and decode media
+        shell: bash
+        run: |
+          mkdir -p media
+          cat incoming/live_parts/part*.txt | tr -d '\n\r' | base64 -d > media/VIAROVE_post01_live_short.mp4
+      - name: Commit final media
+        shell: bash
+        run: |
+          git config user.name "VIAROVE Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add media/VIAROVE_post01_live_short.mp4
+          git commit -m "Assemble VIAROVE live post 01" || exit 0
+          git push
