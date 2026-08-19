@@ -1,0 +1,28 @@
+name: Assemble VIAROVE V2 HQ Music
+on:
+  push:
+    paths:
+      - 'incoming/v2_parts/READY.txt'
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble HQ video
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p media
+          cat incoming/v2_parts/part*.txt | tr -d '\n\r' | base64 -d > media/VIAROVE_POST_01_V2_HQ_MUSIC_TEST3.mp4
+          test "$(stat -c%s media/VIAROVE_POST_01_V2_HQ_MUSIC_TEST3.mp4)" -eq 1267420
+          echo "d8c53b7e20150e8d6b62874a51dcf788e799e3831837158c7c331ef89dbca722  media/VIAROVE_POST_01_V2_HQ_MUSIC_TEST3.mp4" | sha256sum -c -
+      - name: Commit final media
+        shell: bash
+        run: |
+          git config user.name "VIAROVE Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add media/VIAROVE_POST_01_V2_HQ_MUSIC_TEST3.mp4
+          git commit -m "Add VIAROVE V2 HQ music test" || exit 0
+          git push
