@@ -1,0 +1,33 @@
+name: Render VIAROVE V2C diagnostic
+on:
+  push:
+    paths:
+      - 'incoming/V2C.ready'
+permissions:
+  contents: write
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render and record status
+        shell: bash
+        run: |
+          mkdir -p diagnostics media
+          if bash scripts/render_v2_quality_music.sh > diagnostics/v2c.log 2>&1; then
+            echo SUCCESS > diagnostics/V2C_STATUS.txt
+          else
+            code=$?
+            echo FAILED:$code > diagnostics/V2C_STATUS.txt
+            tail -n 80 diagnostics/v2c.log >> diagnostics/V2C_STATUS.txt
+          fi
+      - name: Commit status and media
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "VIAROVE Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add diagnostics/V2C_STATUS.txt diagnostics/v2c.log
+          if [ -f media/VIAROVE_V2_QUALITY_MUSIC_TEST.mp4 ]; then git add media/VIAROVE_V2_QUALITY_MUSIC_TEST.mp4; fi
+          git commit -m "VIAROVE V2C diagnostic result" || exit 0
+          git push
