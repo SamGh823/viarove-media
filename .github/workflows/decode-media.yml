@@ -1,0 +1,33 @@
+name: Decode media
+on:
+  push:
+    paths:
+      - 'incoming/*.b64'
+permissions:
+  contents: write
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode base64 media
+        shell: bash
+        run: |
+          mkdir -p media
+          shopt -s nullglob
+          for f in incoming/*.b64; do
+            name="$(basename "$f" .b64)"
+            base64 -d "$f" > "media/$name"
+          done
+      - name: Commit decoded media
+        shell: bash
+        run: |
+          git config user.name "VIAROVE Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add media/
+          if git diff --cached --quiet; then
+            echo "No media changes"
+            exit 0
+          fi
+          git commit -m "Decode VIAROVE media"
+          git push
