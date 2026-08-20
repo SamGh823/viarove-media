@@ -1,0 +1,57 @@
+name: Build VIAROVE V7 Human Instruments Test
+
+on:
+  pull_request:
+    paths:
+      - 'v7-trigger.txt'
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
+      - name: Download V5 4K source video
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' \
+            'https://drive.google.com/uc?export=download&id=12GJx86x6c2mxqJBK9fHCORugIMqWEEw3' \
+            -o /tmp/source.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate -of json /tmp/source.mp4 | tee /tmp/source.json
+
+      - name: Download human-arranged professional funk track
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' \
+            'https://incompetech.com/music/royalty-free/mp3-royaltyfree/I%20Got%20a%20Stick%20Arr%20Bryan%20Teoh.mp3' \
+            -o /tmp/music.mp3
+          test -s /tmp/music.mp3
+          ffprobe -v error -show_entries format=duration,size,bit_rate:format_tags=artist,title,album -show_entries stream=codec_name,sample_rate,channels,bit_rate -of json /tmp/music.mp3 | tee /tmp/music.json
+
+      - name: Render V7 natural-instrument test
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ffmpeg -y \
+            -i /tmp/source.mp4 \
+            -ss 6.0 -i /tmp/music.mp3 \
+            -map 0:v:0 -map 1:a:0 \
+            -c:v copy \
+            -af "loudnorm=I=-14:LRA=11:TP=-1.0,afade=t=in:st=0:d=0.05,afade=t=out:st=12.0:d=0.5" \
+            -c:a aac -b:a 320k -ar 48000 \
+            -t 12.5 -movflags +faststart \
+            out/VIAROVE_V7_HUMAN_INSTRUMENTS.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json out/VIAROVE_V7_HUMAN_INSTRUMENTS.mp4 | tee out/VIAROVE_V7_FFPROBE.json
+          cp /tmp/music.json out/VIAROVE_V7_MUSIC_FFPROBE.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: viarove-v7-human-instruments
+          path: out/
+          retention-days: 7
