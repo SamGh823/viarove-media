@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -L --fail --retry 3 -A 'Mozilla/5.0' \
-            'https://drive.google.com/uc?export=download&id=15YY3jewMO8s0z3OZ4lMHUvxh360lGO3a' \
+            'https://drive.google.com/uc?export=download&id=12GJx86x6c2mxqJBK9fHCORugIMqWEEw3' \
             -o /tmp/v5.mp4
           ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate -of json /tmp/v5.mp4 | tee /tmp/source.json
 
