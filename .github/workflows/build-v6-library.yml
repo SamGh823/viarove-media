@@ -1,13 +1,10 @@
 name: Build VIAROVE V6 Library Test
 
 on:
-  push:
+  pull_request:
     paths:
       - 'v6-trigger.txt'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   render:
@@ -15,67 +12,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render and record status
-        shell: bash
+      - name: Install ffmpeg
         run: |
-          set +e
-          mkdir -p media
-          STATUS=media/VIAROVE_V6_BUILD_STATUS.txt
-          : > "$STATUS"
-          echo "started=$(date -u +%FT%TZ)" >> "$STATUS"
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
 
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-          fi
-          echo "ffmpeg=$(ffmpeg -version | head -1)" >> "$STATUS"
+      - name: Download V5 high-quality video
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' \
+            'https://drive.google.com/uc?export=download&id=15YY3jewMO8s0z3OZ4lMHUvxh360lGO3a' \
+            -o /tmp/v5.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate -of json /tmp/v5.mp4 | tee /tmp/source.json
 
-          VIDEO_URL='https://drive.google.com/uc?export=download&id=15YY3jewMO8s0z3OZ4lMHUvxh360lGO3a'
-          curl -L --fail --retry 3 -A 'Mozilla/5.0' "$VIDEO_URL" -o /tmp/v5.mp4
-          VRC=$?
-          echo "video_download_rc=$VRC" >> "$STATUS"
-          echo "video_bytes=$(stat -c%s /tmp/v5.mp4 2>/dev/null || echo 0)" >> "$STATUS"
-          if [ $VRC -eq 0 ]; then
-            ffprobe -v error -show_entries format=duration,size -show_entries stream=index,codec_type,codec_name,width,height,bit_rate -of json /tmp/v5.mp4 > media/VIAROVE_V6_SOURCE_FFPROBE.json 2>&1
-            echo "video_ffprobe_rc=$?" >> "$STATUS"
-          fi
+      - name: Download selected professional-library track
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 \
+            'https://raw.githubusercontent.com/Ankhtepot/Placeholders/24d35168b1bd84130b75a9a7e134eef183d433e8/public/mp3/Hope/mixkit-dirty-thinkin-989.mp3' \
+            -o /tmp/music.mp3
+          test -s /tmp/music.mp3
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=codec_name,sample_rate,channels,bit_rate -of json /tmp/music.mp3 | tee /tmp/music.json
 
-          TRACK='https://assets.mixkit.co/music/preview/mixkit-dirty-thinkin-989.mp3'
-          curl -L --fail --retry 3 -A 'Mozilla/5.0' "$TRACK" -o /tmp/music.mp3
-          MRC=$?
-          echo "music_download_rc=$MRC" >> "$STATUS"
-          echo "music_bytes=$(stat -c%s /tmp/music.mp3 2>/dev/null || echo 0)" >> "$STATUS"
-          if [ $MRC -eq 0 ]; then
-            ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=codec_name,sample_rate,channels,bit_rate -of json /tmp/music.mp3 > media/VIAROVE_V6_MUSIC_FFPROBE.json 2>&1
-            echo "music_ffprobe_rc=$?" >> "$STATUS"
-          fi
+      - name: Render V6 while preserving V5 video stream
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ffmpeg -y \
+            -i /tmp/v5.mp4 \
+            -ss 0 -i /tmp/music.mp3 \
+            -map 0:v:0 -map 1:a:0 \
+            -c:v copy \
+            -af "loudnorm=I=-13:LRA=8:TP=-1.2,afade=t=in:st=0:d=0.08,afade=t=out:st=12.1:d=0.4" \
+            -c:a aac -b:a 320k -ar 48000 \
+            -t 12.5 -movflags +faststart \
+            out/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json out/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4 | tee out/VIAROVE_V6_FFPROBE.json
+          cp /tmp/music.json out/VIAROVE_V6_MUSIC_FFPROBE.json
 
-          if [ $VRC -eq 0 ] && [ $MRC -eq 0 ]; then
-            ffmpeg -y \
-              -i /tmp/v5.mp4 \
-              -ss 0 -i /tmp/music.mp3 \
-              -map 0:v:0 -map 1:a:0 \
-              -c:v copy \
-              -af "loudnorm=I=-13:LRA=8:TP=-1.2,afade=t=in:st=0:d=0.12,afade=t=out:st=12.1:d=0.4" \
-              -c:a aac -b:a 320k -ar 48000 \
-              -t 12.5 -movflags +faststart \
-              media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4
-            RRC=$?
-            echo "render_rc=$RRC" >> "$STATUS"
-            if [ $RRC -eq 0 ]; then
-              ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4 > media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.ffprobe.json 2>&1
-              echo "output_bytes=$(stat -c%s media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4)" >> "$STATUS"
-            fi
-          else
-            echo "render_rc=skipped" >> "$STATUS"
-          fi
-
-          echo "finished=$(date -u +%FT%TZ)" >> "$STATUS"
-
-          git config user.name 'VIAROVE Bot'
-          git config user.email 'actions@users.noreply.github.com'
-          git add media/VIAROVE_V6_BUILD_STATUS.txt media/VIAROVE_V6_SOURCE_FFPROBE.json media/VIAROVE_V6_MUSIC_FFPROBE.json media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.ffprobe.json media/VIAROVE_V6_MIXKIT_DIRTY_THINKIN.mp4 2>/dev/null || true
-          if ! git diff --cached --quiet; then
-            git commit -m 'Build VIAROVE V6 professional-library test'
-            git pull --rebase origin main || true
-            git push || true
-          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: viarove-v6-review
+          path: out/
+          retention-days: 7
