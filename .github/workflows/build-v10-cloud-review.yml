@@ -1,0 +1,75 @@
+name: Build VIAROVE V10 Cloud Review
+
+on:
+  pull_request:
+    paths:
+      - 'v10-cloud-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
+      - name: Download approved 4K visual base and licensed music
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' \
+            'https://drive.google.com/uc?export=download&id=12GJx86x6c2mxqJBK9fHCORugIMqWEEw3' \
+            -o /tmp/base.mp4
+          PAGE='https://freemusicarchive.org/music/Ketsa/cc-by-free-to-use-for-anything/soul-sync/'
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' "$PAGE" -o /tmp/page.html
+          python3 - <<'PY'
+          import re, html
+          text=html.unescape(open('/tmp/page.html',encoding='utf-8',errors='ignore').read()).replace('\\/','/')
+          m=re.search(r'https://files\.freemusicarchive\.org/storage-freemusicarchive-org/tracks/[^"\'<> ]+?\.mp3',text)
+          if not m: raise SystemExit('Soul Sync MP3 URL not found')
+          open('/tmp/music_url.txt','w').write(m.group(0))
+          PY
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' "$(cat /tmp/music_url.txt)" -o /tmp/music.mp3
+          test -s /tmp/base.mp4
+          test -s /tmp/music.mp3
+
+      - name: Render V10 4K review
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p review
+          printf '%s\n' 'Do you miss them?' > /tmp/hook1.txt
+          printf '%s\n%s\n' 'Or the version of you' 'that existed with them?' > /tmp/hook2.txt
+          ffmpeg -y \
+            -i /tmp/base.mp4 \
+            -ss 64.2496 -i /tmp/music.mp3 \
+            -filter_complex "[0:v]delogo=x=250:y=1050:w=1660:h=520:show=0,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=/tmp/hook1.txt:fontcolor=white:fontsize=116:borderw=4:bordercolor=black@0.50:shadowx=4:shadowy=6:shadowcolor=black@0.72:x=(w-text_w)/2:y=1240:enable='between(t,0.08,2.42)',drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=/tmp/hook2.txt:fontcolor=white:fontsize=104:line_spacing=24:borderw=4:bordercolor=black@0.50:shadowx=4:shadowy=6:shadowcolor=black@0.72:x=(w-text_w)/2:y=1180:enable='between(t,2.42,11.90)'[v];[1:a]atrim=0:12.5,asetpts=PTS-STARTPTS,loudnorm=I=-13.4:LRA=9:TP=-1.0,afade=t=in:st=0:d=0.04,afade=t=out:st=11.9:d=0.6[a]" \
+            -map '[v]' -map '[a]' \
+            -t 12.5 -r 30 \
+            -c:v libx264 -preset medium -b:v 58M -maxrate 64M -bufsize 116M \
+            -profile:v high -level 5.2 -pix_fmt yuv420p \
+            -c:a aac -b:a 320k -ar 48000 \
+            -movflags +faststart \
+            review/VIAROVE_V10_SOUL_SYNC_HOOK_4K.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json review/VIAROVE_V10_SOUL_SYNC_HOOK_4K.mp4 | tee review/VIAROVE_V10_FFPROBE.json
+          test "$(stat -c%s review/VIAROVE_V10_SOUL_SYNC_HOOK_4K.mp4)" -lt 99000000
+
+      - name: Commit cloud review video to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'viarove-bot'
+          git config user.email 'viarove-bot@users.noreply.github.com'
+          git add review/VIAROVE_V10_SOUL_SYNC_HOOK_4K.mp4 review/VIAROVE_V10_FFPROBE.json
+          git commit -m 'Add V10 cloud review video' || exit 0
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
