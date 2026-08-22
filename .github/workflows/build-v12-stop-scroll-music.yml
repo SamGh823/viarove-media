@@ -1,0 +1,137 @@
+name: Build VIAROVE V12 Stop-Scroll Music Test
+
+on:
+  pull_request:
+    paths:
+      - 'v12-trigger.txt'
+      - '.github/workflows/build-v12-stop-scroll-music.yml'
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
+      - name: Download approved 4K visual base
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -A 'Mozilla/5.0' \
+            'https://drive.google.com/uc?export=download&id=12GJx86x6c2mxqJBK9fHCORugIMqWEEw3' \
+            -o /tmp/source.mp4
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate -of json /tmp/source.mp4 | tee /tmp/source.json
+
+      - name: Download What It Feels Like from Free Music Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAGE='https://freemusicarchive.org/index.php/music/Ketsa/cc-by-free-to-use-for-anything/what-it-feels-like-1/'
+          curl -L --fail --retry 4 -A 'Mozilla/5.0' "$PAGE" -o /tmp/page.html
+          python3 - <<'PY'
+          import re, html
+          text=open('/tmp/page.html','r',encoding='utf-8',errors='ignore').read()
+          text=html.unescape(text).replace('\\/','/')
+          pats=[
+              r'https://files\.freemusicarchive\.org/storage-freemusicarchive-org/tracks/[^"\'<> ]+?\.mp3',
+              r'"fileUrl"\s*:\s*"(https:[^"]+?\.mp3)"',
+              r'"url"\s*:\s*"(https://files\.freemusicarchive\.org/[^"]+?\.mp3)"'
+          ]
+          urls=[]
+          for p in pats:
+              for m in re.finditer(p,text):
+                  u=m.group(1) if m.groups() else m.group(0)
+                  u=u.replace('\\u0026','&')
+                  if u not in urls: urls.append(u)
+          if not urls:
+              raise SystemExit('No FMA MP3 URL found')
+          open('/tmp/music_url.txt','w').write(urls[0])
+          print(urls[0])
+          PY
+          MUSIC_URL=$(cat /tmp/music_url.txt)
+          curl -L --fail --retry 4 -A 'Mozilla/5.0' "$MUSIC_URL" -o /tmp/music.mp3
+          test -s /tmp/music.mp3
+          ffprobe -v error -show_entries format=duration,size,bit_rate:format_tags=artist,title -show_entries stream=codec_name,sample_rate,channels,bit_rate -of json /tmp/music.mp3 | tee /tmp/music.json
+
+      - name: Select strongest 12.5 second music window
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -y -i /tmp/music.mp3 -ac 1 -ar 8000 -f s16le /tmp/music.pcm >/dev/null 2>&1
+          python3 - <<'PY'
+          import array, math
+          rate = 8000
+          block_s = 0.5
+          block_n = int(rate * block_s)
+          window_blocks = int(12.5 / block_s)
+          with open('/tmp/music.pcm','rb') as f:
+              data = array.array('h')
+              data.frombytes(f.read())
+          rms=[]
+          for i in range(0, len(data)-block_n+1, block_n):
+              b=data[i:i+block_n]
+              s=sum(float(x)*float(x) for x in b)/len(b)
+              rms.append(math.sqrt(s)+1e-9)
+          if len(rms) < window_blocks:
+              start=0.0
+          else:
+              best=(-1.0,0)
+              for i in range(0, len(rms)-window_blocks+1):
+                  w=rms[i:i+window_blocks]
+                  first=w[:4]
+                  avg=sum(w)/len(w)
+                  first_avg=sum(first)/len(first)
+                  peak=max(w)
+                  valley=min(w)
+                  movement=(peak-valley)/(avg+1e-9)
+                  score=0.44*avg + 0.36*first_avg + 0.14*peak + 0.06*avg*movement
+                  if score > best[0]:
+                      best=(score,i)
+              start=best[1]*block_s
+          with open('/tmp/music_start.txt','w') as f:
+              f.write(f'{start:.3f}')
+          print(f'Selected music start: {start:.3f}s')
+          PY
+          cat /tmp/music_start.txt
+
+      - name: Render V12 music test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          START=$(cat /tmp/music_start.txt)
+          printf '%s\n' 'Do you miss them?' > /tmp/hook1.txt
+          printf '%s\n' 'Or the version of you' 'that existed with them?' > /tmp/hook2.txt
+
+          ffmpeg -y \
+            -i /tmp/source.mp4 \
+            -ss "$START" -i /tmp/music.mp3 \
+            -filter_complex "[0:v]split=2[base][soft];[soft]crop=1520:430:320:1110,gblur=sigma=22[patch];[base][patch]overlay=320:1110,drawbox=x=320:y=1110:w=1520:h=430:color=black@0.20:t=fill,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=/tmp/hook1.txt:fontcolor=white:fontsize=116:borderw=4:bordercolor=black@0.55:shadowx=4:shadowy=6:shadowcolor=black@0.75:x=(w-text_w)/2:y=1240:enable='between(t,0.05,2.35)',drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=/tmp/hook2.txt:fontcolor=white:fontsize=104:line_spacing=24:borderw=4:bordercolor=black@0.55:shadowx=4:shadowy=6:shadowcolor=black@0.75:x=(w-text_w)/2:y=1190:enable='between(t,2.35,11.90)'[v];[1:a]atrim=0:12.5,asetpts=PTS-STARTPTS,highpass=f=35,lowpass=f=17500,loudnorm=I=-12.2:LRA=8:TP=-1.0,afade=t=in:st=0:d=0.02,afade=t=out:st=11.9:d=0.6,alimiter=limit=0.891[a]" \
+            -map '[v]' -map '[a]' \
+            -t 12.5 -r 30 \
+            -c:v libx264 -preset fast -crf 8 -maxrate 90M -bufsize 180M \
+            -profile:v high -level 5.2 -pix_fmt yuv420p \
+            -c:a aac -b:a 320k -ar 48000 \
+            -movflags +faststart \
+            out/VIAROVE_V12_STOP_SCROLL_MUSIC_TEST.mp4
+
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json out/VIAROVE_V12_STOP_SCROLL_MUSIC_TEST.mp4 | tee out/VIAROVE_V12_FFPROBE.json
+          cp /tmp/music.json out/VIAROVE_V12_MUSIC_FFPROBE.json
+          printf '%s\n' \
+            'Music: What It Feels Like — Ketsa' \
+            'Source: Free Music Archive' \
+            'License: CC BY 4.0' \
+            'Commercial use allowed with attribution per track page.' \
+            'Required attribution: What It Feels Like — Ketsa (CC BY 4.0), via Free Music Archive.' \
+            "Selected music start: ${START} seconds" \
+            'Visual and hook: carried forward from approved V10/V11 candidate.' > out/VIAROVE_V12_LICENSE_AND_NOTES.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: viarove-v12-stop-scroll-music-test
+          path: out/
+          retention-days: 7
