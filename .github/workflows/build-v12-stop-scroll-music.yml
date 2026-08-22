@@ -119,7 +119,7 @@ jobs:
             -movflags +faststart \
             out/VIAROVE_V12_STOP_SCROLL_MUSIC_TEST.mp4
 
-          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json out/VIAROVE_V12_FFPROBE.json
+          ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=index,codec_type,codec_name,width,height,bit_rate,sample_rate,channels -of json out/VIAROVE_V12_STOP_SCROLL_MUSIC_TEST.mp4 | tee out/VIAROVE_V12_FFPROBE.json
           cp /tmp/music.json out/VIAROVE_V12_MUSIC_FFPROBE.json
           printf '%s\n' \
             'Music: What It Feels Like — Ketsa' \
